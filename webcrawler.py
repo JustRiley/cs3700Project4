@@ -29,15 +29,15 @@ try:
     sock.connect(('fring.ccs.neu.edu',80))
 except Exception as e: 
     print("something's wrong %s" % e)
-print("sending")
-sendthis = 'GET /accounts/login/?next=/fakebook/ HTTP/1.1\nHost: fring.ccs.neu.edu\n\n'
+# print("sending")
+sendthis = 'GET /accounts/login/?next=/fakebook/ HTTP/1.0\nHost: fring.ccs.neu.edu\nConnection: keep-alive\n\n'
 sock.send(sendthis.encode('utf-8'))
 print("sent")
 print("waiting for response")
 data = (sock.recv(200000000))
 data +=(sock.recv(200000000))
 data = data.decode('utf-8')
-print(data)
+# print(data)
 parser.feed(data)
 headerWords = responseHeader.split("\n")
 responseCode = headerWords[0].split(" ")
@@ -48,8 +48,15 @@ sessionId = sessionIdArray[1].split(";")[0]
 print("response Code",responseCode[1])
 
 print("send login")
-body = 'username=' + username + '&password=' + password
-sendlogin = ('POST /accounts/login/ HTTP/1.1\n' +'Host: www.fring.ccs.neu.edu:80\nAccept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8\nCookie: csrftoken=' + csrfToken + '; sessionid='+ sessionId +'\nReferer: http://fring.ccs.neu.edu/accounts/login/\nContent-Type: application/x-www-form-urlencoded\nContent-Length: '+ str(len(body)) + '\n\n'+ body +'\n\n')
+# body = 'username='+username+'&password='+password+'&csrftoken='+csrfToken
+# sendlogin = ('POST /accounts/login/ HTTP/1.0\n' +'Host: www.fring.ccs.neu.edu\nAccept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8\nConnection: keep-alive\nCookie: csrftoken=' + csrfToken + '; sessionid='+ sessionId +'\nReferer: http://fring.ccs.neu.edu/accounts/login/?next=/fakebook/\nOrigin: http://fring.ccs.neu.edu\nContent-Type: application/x-www-form-urlencoded\nContent-Length: '+ str(len(body)) + '\n\n'+ body +'\n\n')
+sendlogin = '''POST /accounts/login/ HTTP/1.1
+Host: fring.ccs.neu.edu
+Content-Type: application/x-www-form-urlencoded
+Cookie: csrftoken={0}
+Cache-Control: no-cache
+
+password=E0N5X388&username=1946011&csrfmiddlewaretoken={1}\n\n'''.format(csrfToken, csrfToken)
 print(sendlogin)
 sock.sendall(sendlogin.encode('utf-8'))
 print("sent")
