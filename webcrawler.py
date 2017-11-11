@@ -11,7 +11,6 @@ secret_flag_attrs = [('class', 'secret_flag'), ('style', 'color:red')]
 
 # username = sys.argv[1]
 # password = sys.argv[2]
-# cookie = None               # set cookie after login
 
 queued = queue.Queue()      # list of urls to crawl
 visited = []                # list of urls already crawled
@@ -22,6 +21,7 @@ username = '1962838'
 password = '9VGKTMDC'
 
 csrf_token = None
+session_id = None
 
 class CustomHTMLParser(HTMLParser):
     def __init__(self):
@@ -33,7 +33,6 @@ class CustomHTMLParser(HTMLParser):
         global csrf_token
         if tag == "a":
             link = [ii[1] for ii in attrs if ii[0] == "href"][0]
-            print("link ", link)
             # if begins with base url (either with or without "http://") and not in visited
             if link[0] == '/' and link not in visited:
                 queued.put(link)
@@ -44,15 +43,6 @@ class CustomHTMLParser(HTMLParser):
 
         elif tag == "input" and not csrf_token and ('name', 'csrfmiddlewaretoken') in attrs:
             csrf_token = [ii[1] for ii in attrs if ii[0] == "value"][0]
-            #csrf = False
-            #for ii in attrs:
-        #	if csrf and ii[0] == 'value':
-        #	    csrf_token = ii[1]
-        #	    break
-        #	if ii == ('name', 'csrfmiddlewaretoken'):
-        #	    csrf = True
-
-        #  print("csrf token tag: ", csrf_token)
 
         else:
             return
@@ -72,6 +62,7 @@ class CustomHTMLParser(HTMLParser):
 # helper method to separate response headers and convert to json,
 # and decompress the response body
 def parse_response(data):
+    # print("RAW DATA:\n", data)
     start_idx = data.find('\r\n\r\n'.encode('utf-8'))
 
     # headers include everything up to CRLF
@@ -84,8 +75,11 @@ def parse_response(data):
     resp_header = {}
     for header in header_str:
         key, sep, value = header.partition(': ')
-        resp_header[key] = value
+        resp_header[key] = value.replace('\r', '')
 
+    # TODO: special handling for chunks
+    if resp_header.get('Transfer-Encoding', None):
+        print('TRANSFER-ENCODING: CHUNKED')
 
     # response body begins after CRLF
     resp_body = data[start_idx+4:]
@@ -94,6 +88,10 @@ def parse_response(data):
     else:
         resp_body = resp_body.decode('utf-8')
 
+    # print('RESPONSE: ')
+    # print(resp_code)
+    # print(resp_header)
+    # print(resp_body)
     return resp_code, resp_header, resp_body
 
 
@@ -102,13 +100,85 @@ def parse_response(data):
 # ex: to get csrftoken within cookie header, do get_header_secondary_value(resp_header['Cookie'],'csrftoken')
 def get_header_secondary_value(header_val, secondary_key):
     secondary_headers = header_val.rsplit('; ')
-    print(secondary_headers)
 
     for header in secondary_headers:
         key, sep, value = header.partition('=')
-        print("header key: ", key, "header value: ", value)
         if key == secondary_key:
             return value
+
+
+# simple GET request after logged in
+# (multiprocessing: add token and sessionid as params)
+# return resp_code, resp_header, resp_body
+def http_get(socket, url, additional_headers=None):
+    global csrf_token, session_id
+    request = ('GET {0} HTTP/1.1\nHost: fring.ccs.neu.edu\n' +
+               'Accept-Encoding: gzip, deflate\nConnection: keep-alive\n' +
+               'Cookie: csrftoken={1}; sessionid={2}\r\n\r\n').format(url, csrf_token, session_id)
+    socket.send(request.encode('utf-8'))
+
+    resp = (socket.recv(10000))
+    return parse_response(resp)
+
+
+# login to fakebook with given socket (for potential multiprocessing)
+# return response code of post request
+# after logging in, links have been added to queue, so just begin iterating through those
+def login(socket):
+    global session_id
+
+    # get login page to get csrf token
+    print("Requesting login page")
+    get_login = ('GET /accounts/login/?next=/fakebook/ HTTP/1.1\n' +
+                 'Host: fring.ccs.neu.edu\nAccept-Encoding: gzip, deflate\n' +
+                 'Connection: keep-alive\n\n')
+    print(get_login)
+    socket.send(get_login.encode('utf-8'))
+
+    data = (socket.recv(10000))
+    resp_code, resp_header, resp_body = parse_response(data)
+    # print("GET LOGIN PAGE RESPONSE CODE: ", resp_code)
+    # print("GET LOGIN PAGE HEADERS: ", str(resp_header))
+    # print("GET LOGIN PAGE BODY: ", resp_body)
+    parser.feed(resp_body)
+    visited.append('/accounts/login/?next=/fakebook/')
+
+    body = 'password=E0N5X388&username=1946011&csrfmiddlewaretoken={0}'.format(csrf_token)
+    post_login = ('POST /accounts/login/ HTTP/1.1\r\n'+
+                  'Host: fring.ccs.neu.edu\r\n'+
+                  'Content-Type: application/x-www-form-urlencoded\r\n'+
+                  'Cookie: csrftoken={0}\r\n'+
+                  'Cache-Control: no-cache\r\n'+
+                  'Connection: keep-alive\r\n'+
+                  'Accept-Encoding: gzip, deflate\r\n'+
+                  'Content-Length: {1}\r\n\r\n{2}\r\n\r\n').format(csrf_token, len(body), body)
+
+    print(post_login)
+    socket.send(post_login.encode('utf-8'))
+
+    data2 = (socket.recv(1000))
+    resp_code, resp_header, resp_body = parse_response(data2)
+    # print("POST LOGIN RESPONSE CODE: ", resp_code)
+    # print("POST LOGIN RESPONSE HEADER: ", str(resp_header))
+    # print("POST LOGIN RESPONSE BODY: ", resp_body)
+
+    code = resp_code[9:12]
+    # if login successful, should redirect
+    if code == '302':
+        visited.append('/accounts/login/')
+        parser.feed(resp_body)
+
+        # set session_id to use for all requests
+        session_id = get_header_secondary_value(resp_header['Set-Cookie'], 'sessionid')
+
+        # navigate to redirect location
+        redirect = resp_header['Location']
+        resp_code, resp_header, resp_body = http_get(socket, redirect)
+        if '200' in resp_code:
+            visited.append(redirect)
+
+
+    return code
 
 
 
@@ -122,73 +192,27 @@ try:
 except Exception as e:
     print("Socket connection error: %s" % e)
 
+# TODO: crawl links on login page first or last so as not to logout
 
-print("Requesting login page")
-get_login = ('GET /accounts/login/?next=/fakebook/ HTTP/1.1\n' +
-             'Host: fring.ccs.neu.edu\nAccept-Encoding: gzip, deflate\n' +
-             'Connection: keep-alive\n\n')
-print(get_login)
-sock.send(get_login.encode('utf-8'))
+login_response_code = login(sock)
+if login_response_code != '302':
+    print("Login error: response code ", login_response_code)
 
-data = (sock.recv(10000))
-resp_code, resp_header, resp_body = parse_response(data)
-print("GET LOGIN PAGE RESPONSE CODE: ", resp_code)
-print("GET LOGIN PAGE HEADERS: ", str(resp_header))
-print("GET LOGIN PAGE BODY: ", resp_body)
-parser.feed(resp_body)
+while not queued.empty():
+    next_url = queued.get()
+    visited.append(next_url)
 
+    # http_get returns 3-tuple
+    response = http_get(sock, next_url)
+    code = response[0][9:12]
+    # TODO: Handle 301, 403, 404, 500
+    # if code not in ['200', '302']:
+    #
+    print("queued: ", list(queued.queue))
+    # for q in queued.:
 
-# extract csrf token from cookie header
-# cookie = resp_header['Cookie']
-# csrf_token = cookie[cookie.find('csrftoken=')+10:]
-# csrf_token = csrf_token[:csrf_token.find(';')]
-print('Set cookie header: ', resp_header['Set-Cookie'])
-session_id = get_header_secondary_value(resp_header['Set-Cookie'], 'sessionid')
-post_login = '''POST /accounts/login/ HTTP/1.1
-Host: fring.ccs.neu.edu
-Content-Type: application/x-www-form-urlencoded
-Cookie: csrftoken={0}
-Cache-Control: no-cache
+    print("visited: ", visited)
 
-password=E0N5X388&username=1946011&csrfmiddlewaretoken={1}\n\n'''.format(csrf_token, csrf_token)
-
-post_login2 = '''POST /accounts/login/ HTTP/1.1
-Host: fring.ccs.neu.edu
-Connection: keep-alive
-Cache-Control: max-age=0
-Origin: http://fring.ccs.neu.edu
-Upgrade-Insecure-Requests: 1
-Content-Type: application/x-www-form-urlencoded
-Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8
-Referer: http://fring.ccs.neu.edu/accounts/login/?next=/fakebook/
-Accept-Encoding: gzip, deflate
-Accept-Language: en-US,en;q=0.8,fr;q=0.6
-Cookie: csrftoken={0}
-
-password=E0N5X388&username=1946011&csrfmiddlewaretoken={1}\n\n'''.format(csrf_token, csrf_token)
-
-print( post_login2)
-sock.send(post_login2.encode('utf-8'))
-
-
-data2 = (sock.recv(10000000))
-resp_code, resp_header, resp_body = parse_response(data2)
-print("POST LOGIN RESPONSE CODE: ", resp_code)
-print("POST LOGIN RESPONSE HEADER: ", str(resp_header))
-print("POST LOGIN RESPONSE BODY: ", resp_body)
-parser.feed(resp_body)
-
-fakebook = ('GET /fakebook/ HTTP/1.1\n' +
-             'Host: fring.ccs.neu.edu\nAccept-Encoding: gzip, deflate\n' +
-             'Connection: keep-alive\n\n')
-sock.send(fakebook.encode('utf-8'))
-
-data3 = (sock.recv(100000))
-resp_code, resp_header, resp_body = parse_response(data)
-print("GET FAKEBOOK RESPONSE CODE: ", resp_code)
-print("GET FAKEBOOK HEADERS: ", str(resp_header))
-print("GET FAKEBOOK BODY: ", resp_body)
-parser.feed(resp_body)
 
 sock.shutdown(1)
 sock.close()
