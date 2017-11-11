@@ -21,19 +21,20 @@ flags = []                  # secret flags
 username = '1962838'
 password = '9VGKTMDC'
 
+csrf_token = None
 
 class CustomHTMLParser(HTMLParser):
     def __init__(self):
         HTMLParser.__init__(self)
         # if last handled start tag was <h2 class="secret_flag" style="color:red">
         self.flag = False
-	self.token = None
 
     def handle_starttag(self, tag, attrs):
+        global csrf_token
         if tag == "a":
             link = [ii[1] for ii in attrs if ii[0] == "href"][0]
             print("link ", link)
-	    # if begins with base url (either with or without "http://") and not in visited
+            # if begins with base url (either with or without "http://") and not in visited
             if link[0] == '/' and link not in visited:
                 queued.put(link)
 
@@ -41,12 +42,12 @@ class CustomHTMLParser(HTMLParser):
         elif tag == "h2" and attrs == secret_flag_attrs:
             self.flag = True
 
-	elif tag == "input" and not self.token:
-	    self.token = [ii[1] for ii in attrs if ii[0] == "csrfmiddlewaretoken"][0]
-	    print("csrf token tag: ", self.token)
+        elif tag == "input" and not csrf_token:
+            csrf_token = [ii[1] for ii in attrs if ii[0] == "csrfmiddlewaretoken"][0]
+            print("csrf token tag: ", csrf_token)
 
-	else:
-	    return
+        else:
+            return
 
     # def handle_endtag(self, tag):
     #     print("Encountered an end tag:", tag)
@@ -104,14 +105,14 @@ sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 sock.settimeout(10.30)
 try:
     sock.connect(('fring.ccs.neu.edu', 80))
-except Exception as e: 
+except Exception as e:
     print("Socket connection error: %s" % e)
 
 
 print("Requesting login page")
 get_login = ('GET /accounts/login/?next=/fakebook/ HTTP/1.1\n' +
-            'Host: fring.ccs.neu.edu\nAccept-Encoding: gzip, deflate\n' +
-            'Connection: keep-alive\n\n')
+             'Host: fring.ccs.neu.edu\nAccept-Encoding: gzip, deflate\n' +
+             'Connection: keep-alive\n\n')
 print(get_login)
 sock.send(get_login.encode('utf-8'))
 
@@ -127,7 +128,6 @@ parser.feed(resp_body)
 # cookie = resp_header['Cookie']
 # csrf_token = cookie[cookie.find('csrftoken=')+10:]
 # csrf_token = csrf_token[:csrf_token.find(';')]
-csrf_token = parser.token
 
 post_login = '''POST /accounts/login/ HTTP/1.1
 Host: fring.ccs.neu.edu
