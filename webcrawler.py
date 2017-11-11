@@ -43,16 +43,16 @@ class CustomHTMLParser(HTMLParser):
             self.flag = True
 
         elif tag == "input" and not csrf_token and ('name', 'csrfmiddlewaretoken') in attrs:
-           csrf_token = [ii[1] for ii in attrs if ii[0] == "value"][0]
+            csrf_token = [ii[1] for ii in attrs if ii[0] == "value"][0]
             #csrf = False
-	    #for ii in attrs:
-	#	if csrf and ii[0] == 'value':
-	#	    csrf_token = ii[1]
-	#	    break
-	#	if ii == ('name', 'csrfmiddlewaretoken'):
-	#	    csrf = True
+            #for ii in attrs:
+        #	if csrf and ii[0] == 'value':
+        #	    csrf_token = ii[1]
+        #	    break
+        #	if ii == ('name', 'csrfmiddlewaretoken'):
+        #	    csrf = True
 
-	 #  print("csrf token tag: ", csrf_token)
+        #  print("csrf token tag: ", csrf_token)
 
         else:
             return
@@ -102,7 +102,7 @@ def get_header_secondary_value(header_val, secondary_key):
     print(secondary_headers)
     for header in secondary_headers:
         key, sep, value = header.partition('=')
-	 print("header key: ", key, "header value: ", value)
+        print("header key: ", key, "header value: ", value)
         if key == secondary_key:
             return value
 
