@@ -40,6 +40,7 @@ class CustomHTMLParser(HTMLParser):
         # if secret flag tag, set flag to true to handle data correctly
         elif tag == "h2" and attrs == secret_flag_attrs:
             self.flag = True
+            print("FOUND THE FLAG!!!!!!")
 
         elif tag == "input" and not csrf_token and ('name', 'csrfmiddlewaretoken') in attrs:
             csrf_token = [ii[1] for ii in attrs if ii[0] == "value"][0]
@@ -67,7 +68,6 @@ def parse_response(data):
 
     # headers include everything up to CRLF
     header_str = data[:start_idx].decode('utf-8').rsplit('\n')
-
     # first element will be HTTP response code
     resp_code = header_str[0]
     del header_str[0]
@@ -118,7 +118,36 @@ def http_get(socket, url, additional_headers=None):
     socket.send(request.encode('utf-8'))
 
     resp = (socket.recv(10000))
-    return parse_response(resp)
+    resp_code, resp_header, resp_body = parse_response(resp)
+    if ("500" in resp_code) or len(resp_code) == 0:
+        #Close and reopen socket, then try again
+        print("SOCKET CLOSED b/c 500 error")
+        resp_code, resp_header, resp_body = retry_after_500(url)
+        
+    return resp_code, resp_header, resp_body
+
+def retry_after_500(url):
+    global csrf_token, session_id, sock
+    newsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock = newsock
+    sock.settimeout(140.30)
+    try:
+        sock.connect(('fring.ccs.neu.edu', 80))
+    except Exception as e:
+        print("Socket connection error: %s" % e)
+    #if not login(newsock):
+    #    print("ERRRRR")
+    request = ('GET {0} HTTP/1.1\nHost: fring.ccs.neu.edu\n' +
+               'Accept-Encoding: gzip, deflate\nConnection: keep-alive\n' +
+               'Cookie: csrftoken={1}; sessionid={2}\r\n\r\n').format(url, csrf_token, session_id)
+    sock.send(request.encode('utf-8'))
+    resp = (sock.recv(10000))
+    resp_code, resp_header, resp_body = parse_response(resp)
+    print("new code", resp_code)
+    return resp_code, resp_header, resp_body
+
+
+
 
 
 # login to fakebook with given socket (for potential multiprocessing)
@@ -161,13 +190,11 @@ def login(socket):
     # print("POST LOGIN RESPONSE CODE: ", resp_code)
     # print("POST LOGIN RESPONSE HEADER: ", str(resp_header))
     # print("POST LOGIN RESPONSE BODY: ", resp_body)
-
     code = resp_code[9:12]
     # if login successful, should redirect
     if code == '302':
         visited.append('/accounts/login/')
         parser.feed(resp_body)
-
         # set session_id to use for all requests
         session_id = get_header_secondary_value(resp_header['Set-Cookie'], 'sessionid')
 
@@ -186,7 +213,7 @@ parser = CustomHTMLParser()
 
 # setup socket
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-sock.settimeout(10.30)
+sock.settimeout(140.30)
 try:
     sock.connect(('fring.ccs.neu.edu', 80))
 except Exception as e:
@@ -199,20 +226,25 @@ if login_response_code != '302':
     print("Login error: response code ", login_response_code)
 
 while not queued.empty():
+    if len(flags) == 5:
+        break
     next_url = queued.get()
     visited.append(next_url)
 
     # http_get returns 3-tuple
-    response = http_get(sock, next_url)
-    code = response[0][9:12]
+    resp_code, resp_header, resp_body = http_get(sock, next_url)
+    #code = response[0][9:12]
+    code = resp_code
+    parser.feed(resp_body)
     # TODO: Handle 301, 403, 404, 500
     # if code not in ['200', '302']:
     #
-    print("queued: ", list(queued.queue))
+    #print("queued: ", list(queued.queue))
     # for q in queued.:
 
-    print("visited: ", visited)
+    #print("visited: ", visited)
 
 
 sock.shutdown(1)
 sock.close()
+print(flags)
