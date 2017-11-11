@@ -151,8 +151,24 @@ Cookie: csrftoken={0}
 Cache-Control: no-cache
 
 password=E0N5X388&username=1946011&csrfmiddlewaretoken={1}\n\n'''.format(csrf_token, csrf_token)
-print( post_login)
-sock.send(post_login.encode('utf-8'))
+
+post_login2 = '''POST /accounts/login/ HTTP/1.1
+Host: fring.ccs.neu.edu
+Connection: keep-alive
+Cache-Control: max-age=0
+Origin: http://fring.ccs.neu.edu
+Upgrade-Insecure-Requests: 1
+Content-Type: application/x-www-form-urlencoded
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8
+Referer: http://fring.ccs.neu.edu/accounts/login/?next=/fakebook/
+Accept-Encoding: gzip, deflate
+Accept-Language: en-US,en;q=0.8,fr;q=0.6
+Cookie: csrftoken={0}
+
+password=E0N5X388&username=1946011&csrfmiddlewaretoken={1}\n\n'''.format(csrf_token, csrf_token)
+
+print( post_login2)
+sock.send(post_login2.encode('utf-8'))
 
 
 data2 = (sock.recv(10000000))
