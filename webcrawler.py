@@ -83,14 +83,16 @@ def parse_response(data):
 
     resp_header = {}
     for header in header_str:
-        key, sep, value = header.partition(':')
+        key, sep, value = header.partition(': ')
         resp_header[key] = value
 
 
     # response body begins after CRLF
     resp_body = data[start_idx+4:]
-    resp_body = gzip.decompress(resp_body).decode('utf-8')
+	if resp_header.get('Content-Encoding', None):
 
+	    resp_body = gzip.decompress(resp_body).decode('utf-8')
+	
     return resp_code, resp_header, resp_body
 
 
@@ -143,12 +145,10 @@ session_id = get_header_secondary_value(resp_header['Set-Cookie'], 'sessionid')
 post_login = '''POST /accounts/login/ HTTP/1.1
 Host: fring.ccs.neu.edu
 Content-Type: application/x-www-form-urlencoded
-Cookie: csrftoken={0}; sessionid={1}
+Cookie: csrftoken={0}
 Cache-Control: no-cache
-Connection: keep-alive
-Accept-Encoding: gzip, deflate
 
-password=E0N5X388&username=1946011&csrfmiddlewaretoken={2}\n\n'''.format(csrf_token, session_id, csrf_token)
+password=E0N5X388&username=1946011&csrfmiddlewaretoken={1}\n\n'''.format(csrf_token, csrf_token)
 print( post_login)
 sock.send(post_login.encode('utf-8'))
 
