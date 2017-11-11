@@ -89,10 +89,10 @@ def parse_response(data):
 
     # response body begins after CRLF
     resp_body = data[start_idx+4:]
-	if resp_header.get('Content-Encoding', None):
+    if resp_header.get('Content-Encoding', None):
 
-	    resp_body = gzip.decompress(resp_body).decode('utf-8')
-	
+        resp_body = gzip.decompress(resp_body).decode('utf-8')
+
     return resp_code, resp_header, resp_body
 
 
@@ -102,6 +102,7 @@ def parse_response(data):
 def get_header_secondary_value(header_val, secondary_key):
     secondary_headers = header_val.rsplit('; ')
     print(secondary_headers)
+
     for header in secondary_headers:
         key, sep, value = header.partition('=')
         print("header key: ", key, "header value: ", value)
@@ -158,6 +159,19 @@ resp_code, resp_header, resp_body = parse_response(data2)
 print("POST LOGIN RESPONSE CODE: ", resp_code)
 print("POST LOGIN RESPONSE HEADER: ", str(resp_header))
 print("POST LOGIN RESPONSE BODY: ", resp_body)
+parser.feed(resp_body)
+
+fakebook = ('GET /fakebook/ HTTP/1.1\n' +
+             'Host: fring.ccs.neu.edu\nAccept-Encoding: gzip, deflate\n' +
+             'Connection: keep-alive\n\n')
+sock.send(fakebook.encode('utf-8'))
+
+data3 = (sock.recv(100000))
+resp_code, resp_header, resp_body = parse_response(data)
+print("GET FAKEBOOK RESPONSE CODE: ", resp_code)
+print("GET FAKEBOOK HEADERS: ", str(resp_header))
+print("GET FAKEBOOK BODY: ", resp_body)
+parser.feed(resp_body)
+
 sock.shutdown(1)
 sock.close()
-parser.feed(resp_body)
