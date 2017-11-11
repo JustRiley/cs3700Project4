@@ -90,8 +90,9 @@ def parse_response(data):
     # response body begins after CRLF
     resp_body = data[start_idx+4:]
     if resp_header.get('Content-Encoding', None):
-
         resp_body = gzip.decompress(resp_body).decode('utf-8')
+    else:
+        resp_body = resp_body.decode('utf-8')
 
     return resp_code, resp_header, resp_body
 
