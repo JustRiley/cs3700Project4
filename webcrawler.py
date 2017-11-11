@@ -21,25 +21,32 @@ flags = []                  # secret flags
 username = '1962838'
 password = '9VGKTMDC'
 
+
 class CustomHTMLParser(HTMLParser):
     def __init__(self):
         HTMLParser.__init__(self)
         # if last handled start tag was <h2 class="secret_flag" style="color:red">
         self.flag = False
-
+	self.token = None
 
     def handle_starttag(self, tag, attrs):
         if tag == "a":
-            link = [ii[1] for ii in enumerate(attrs) if ii[0] == "href"][0]
-            # if begins with base url (either with or without "http://") and not in visited
-            if ((link[0,17] == BASE_URL or link[7,24] == BASE_URL) and
-                        visited.index(link) == -1):
+            link = [ii[1] for ii in attrs if ii[0] == "href"][0]
+            print("link ", link)
+	    # if begins with base url (either with or without "http://") and not in visited
+            if link[0] == '/' and link not in visited:
                 queued.put(link)
 
         # if secret flag tag, set flag to true to handle data correctly
-        if tag == "h2" and attrs == secret_flag_attrs:
+        elif tag == "h2" and attrs == secret_flag_attrs:
             self.flag = True
 
+	elif tag == "input" and not self.token:
+	    self.token = [ii[1] for ii in attrs if ii[0] == "csrfmiddlewaretoken"][0]
+	    print("csrf token tag: ", self.token)
+
+	else:
+	    return
 
     # def handle_endtag(self, tag):
     #     print("Encountered an end tag:", tag)
@@ -120,7 +127,7 @@ parser.feed(resp_body)
 # cookie = resp_header['Cookie']
 # csrf_token = cookie[cookie.find('csrftoken=')+10:]
 # csrf_token = csrf_token[:csrf_token.find(';')]
-csrf_token = get_header_secondary_value(resp_header['Cookie'], 'csrftoken')
+csrf_token = parser.token
 
 post_login = '''POST /accounts/login/ HTTP/1.1
 Host: fring.ccs.neu.edu
