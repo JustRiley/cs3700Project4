@@ -42,9 +42,17 @@ class CustomHTMLParser(HTMLParser):
         elif tag == "h2" and attrs == secret_flag_attrs:
             self.flag = True
 
-        elif tag == "input" and not csrf_token:
-            csrf_token = [ii[1] for ii in attrs if ii[0] == "csrfmiddlewaretoken"][0]
-            print("csrf token tag: ", csrf_token)
+        elif tag == "input" and not csrf_token and ('name', 'csrfmiddlewaretoken') in attrs:
+           csrf_token = [ii[1] for ii in attrs if ii[0] == "value"][0]
+            #csrf = False
+	    #for ii in attrs:
+	#	if csrf and ii[0] == 'value':
+	#	    csrf_token = ii[1]
+	#	    break
+	#	if ii == ('name', 'csrfmiddlewaretoken'):
+	#	    csrf = True
+
+	 #  print("csrf token tag: ", csrf_token)
 
         else:
             return
@@ -91,8 +99,10 @@ def parse_response(data):
 # ex: to get csrftoken within cookie header, do get_header_secondary_value(resp_header['Cookie'],'csrftoken')
 def get_header_secondary_value(header_val, secondary_key):
     secondary_headers = header_val.rsplit('; ')
+    print(secondary_headers)
     for header in secondary_headers:
         key, sep, value = header.partition('=')
+	 print("header key: ", key, "header value: ", value)
         if key == secondary_key:
             return value
 
@@ -128,22 +138,24 @@ parser.feed(resp_body)
 # cookie = resp_header['Cookie']
 # csrf_token = cookie[cookie.find('csrftoken=')+10:]
 # csrf_token = csrf_token[:csrf_token.find(';')]
-
+print('Set cookie header: ', resp_header['Set-Cookie'])
+session_id = get_header_secondary_value(resp_header['Set-Cookie'], 'sessionid')
 post_login = '''POST /accounts/login/ HTTP/1.1
 Host: fring.ccs.neu.edu
 Content-Type: application/x-www-form-urlencoded
-Cookie: csrftoken={0}
+Cookie: csrftoken={0}; sessionid={1}
 Cache-Control: no-cache
 Connection: keep-alive
 Accept-Encoding: gzip, deflate
 
-password=E0N5X388&username=1946011&csrfmiddlewaretoken={1}\n\n'''.format(csrf_token, csrf_token)
-print("Posting login request: ", post_login)
+password=E0N5X388&username=1946011&csrfmiddlewaretoken={2}\n\n'''.format(csrf_token, session_id, csrf_token)
+print( post_login)
 sock.send(post_login.encode('utf-8'))
 
 
-data2 = (sock.recv(10000))
+data2 = (sock.recv(10000000))
 resp_code, resp_header, resp_body = parse_response(data2)
+print("POST LOGIN RESPONSE CODE: ", resp_code)
 print("POST LOGIN RESPONSE HEADER: ", str(resp_header))
 print("POST LOGIN RESPONSE BODY: ", resp_body)
 sock.shutdown(1)
