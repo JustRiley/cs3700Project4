@@ -59,13 +59,34 @@ def parse_response(data):
     start_idx = data.find('\r\n\r\n'.encode('utf-8'))
 
     # headers include everything up to CRLF
-    resp_header = json.loads(data[:start_idx].decode('utf-8'))
+    header_str = data[:start_idx].decode('utf-8').rsplit('\n')
+
+    # first element will be HTTP response code
+    resp_code = header_str[0]
+    del header_str[0]
+
+    resp_header = {}
+    for header in header_str:
+        key, sep, value = header.partition(':')
+        resp_header[key] = value
+
 
     # response body begins after CRLF
     resp_body = data[start_idx+4:]
     resp_body = gzip.decompress(resp_body).decode('utf-8')
 
-    return resp_header, resp_body
+    return resp_code, resp_header, resp_body
+
+
+
+# get specific value within a header value
+# ex: to get csrftoken within cookie header, do get_header_secondary_value(resp_header['Cookie'],'csrftoken')
+def get_header_secondary_value(header_val, secondary_key):
+    secondary_headers = header_val.rsplit('; ')
+    for header in secondary_headers:
+        key, sep, value = header.partition('=')
+        if key == secondary_key:
+            return value
 
 
 
@@ -88,35 +109,18 @@ print(get_login)
 sock.send(get_login.encode('utf-8'))
 
 data = (sock.recv(10000))
-resp_header, resp_body = parse_response(data)
+resp_code, resp_header, resp_body = parse_response(data)
+print("GET LOGIN PAGE RESPONSE CODE: ", resp_code)
 print("GET LOGIN PAGE HEADERS: ", str(resp_header))
 print("GET LOGIN PAGE BODY: ", resp_body)
 parser.feed(resp_body)
-# print("waiting for response")
-# data = (sock.recv(200000000))
-# data +=(sock.recv(200000000))
-# data = data.decode('utf-8')
-# # print(data)
-# parser.feed(data)
 
-#
-#
-
-# print("waiting for response")
-# data = (sock.recv(1500000))
-# end = '\r\n\r\n'.encode('utf-8')
-# response_idx = data.find(end)+4
-# response = data[response_idx:]
-# response = gzip.decompress(response)
-# print("LOGIN PAGE DATA", response)
-# parser.feed(response.decode('utf-8'))
-# print("send login")
-body = 'id_username=' + username + '&id_password=' + password
 
 # extract csrf token from cookie header
-cookie = resp_header['Cookie']
-csrf_token = cookie[cookie.find('csrftoken=')+10:]
-csrf_token = csrf_token[:csrf_token.find(';')]
+# cookie = resp_header['Cookie']
+# csrf_token = cookie[cookie.find('csrftoken=')+10:]
+# csrf_token = csrf_token[:csrf_token.find(';')]
+csrf_token = get_header_secondary_value(resp_header['Cookie'], 'csrftoken')
 
 post_login = '''POST /accounts/login/ HTTP/1.1
 Host: fring.ccs.neu.edu
@@ -132,7 +136,7 @@ sock.send(post_login.encode('utf-8'))
 
 
 data2 = (sock.recv(10000))
-resp_header, resp_body = parse_response(data2)
+resp_code, resp_header, resp_body = parse_response(data2)
 print("POST LOGIN RESPONSE HEADER: ", str(resp_header))
 print("POST LOGIN RESPONSE BODY: ", resp_body)
 sock.shutdown(1)
