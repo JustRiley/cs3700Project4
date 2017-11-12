@@ -1,4 +1,3 @@
-import json
 import socket
 from html.parser import HTMLParser
 import sys
@@ -7,6 +6,7 @@ import gzip
 
 
 BASE_URL = "fring.ccs.neu.edu" # base url; only crawl sites with this as base
+LOGIN_URL = "/accounts/login/?next=/fakebook/"
 secret_flag_attrs = [('class', 'secret_flag'), ('style', 'color:red')]
 
 # username = sys.argv[1]
@@ -40,7 +40,7 @@ class CustomHTMLParser(HTMLParser):
         # if secret flag tag, set flag to true to handle data correctly
         elif tag == "h2" and attrs == secret_flag_attrs:
             self.flag = True
-            print("FOUND THE FLAG!!!!!!")
+            print("FOUND FLAG # {0} !!!!!!".format(len(flags)))
 
         elif tag == "input" and not csrf_token and ('name', 'csrfmiddlewaretoken') in attrs:
             csrf_token = [ii[1] for ii in attrs if ii[0] == "value"][0]
@@ -60,39 +60,17 @@ class CustomHTMLParser(HTMLParser):
 
 
 
-# helper method to separate response headers and convert to json,
-# and decompress the response body
-def parse_response(data):
-    # print("RAW DATA:\n", data)
-    start_idx = data.find('\r\n\r\n'.encode('utf-8'))
-
-    # headers include everything up to CRLF
-    header_str = data[:start_idx].decode('utf-8').rsplit('\n')
-    # first element will be HTTP response code
-    resp_code = header_str[0]
-    del header_str[0]
-
-    resp_header = {}
-    for header in header_str:
-        key, sep, value = header.partition(': ')
-        resp_header[key] = value.replace('\r', '')
-
-    # TODO: special handling for chunks
-    if resp_header.get('Transfer-Encoding', None):
-        print('TRANSFER-ENCODING: CHUNKED')
-
-    # response body begins after CRLF
-    resp_body = data[start_idx+4:]
-    if resp_header.get('Content-Encoding', None):
-        resp_body = gzip.decompress(resp_body).decode('utf-8')
+# helper method to check if the url is valid
+# returns url without the base url if valid
+# returns None if invalid url
+def check_valid_url(url):
+    if url[0] == '/':
+        return url
+    elif (url[7:24] or url[:17]) == BASE_URL:
+        return url.replace(BASE_URL, '').replace('http://', '')
     else:
-        resp_body = resp_body.decode('utf-8')
+        return None
 
-    # print('RESPONSE: ')
-    # print(resp_code)
-    # print(resp_header)
-    # print(resp_body)
-    return resp_code, resp_header, resp_body
 
 
 
@@ -107,25 +85,69 @@ def get_header_secondary_value(header_val, secondary_key):
             return value
 
 
+
+
+# helper method to separate response headers into dict and decompress response body
+# return 3-tuple of int response_code, dict headers, string body
+# if some error encountered, return 0, 0, 0 (which will cause to try request again)
+def parse_response(data):
+    try:
+        start_idx = data.find('\r\n\r\n'.encode('utf-8'))
+
+        # headers include everything up to CRLF
+        header_str = data[:start_idx].decode('utf-8').rsplit('\n')
+        # first element will be HTTP response code
+        resp_code = int(header_str[0][9:12])
+
+
+        del header_str[0]
+
+        resp_header = {}
+        for header in header_str:
+            key, sep, value = header.partition(': ')
+            resp_header[key] = value.replace('\r', '')
+
+        # TODO: special handling for chunks
+        if resp_header.get('Transfer-Encoding', None):
+            print('TRANSFER-ENCODING: CHUNKED')
+
+        # response body begins after CRLF
+        resp_body = data[start_idx+4:]
+        if resp_header.get('Content-Encoding', None):
+            resp_body = gzip.decompress(resp_body).decode('utf-8')
+        else:
+            resp_body = resp_body.decode('utf-8')
+
+        if resp_code == 200:
+            parser.feed(resp_body)
+
+        return resp_code, resp_header, resp_body
+
+    except (TypeError, ValueError):
+        return 0, 0, 0
+
+
+
 # simple GET request after logged in
 # (multiprocessing: add token and sessionid as params)
-# return resp_code, resp_header, resp_body
+# return response code of request
 def http_get(socket, url, additional_headers=None):
     global csrf_token, session_id
+
+    # send request
     request = ('GET {0} HTTP/1.1\nHost: fring.ccs.neu.edu\n' +
                'Accept-Encoding: gzip, deflate\nConnection: keep-alive\n' +
                'Cookie: csrftoken={1}; sessionid={2}\r\n\r\n').format(url, csrf_token, session_id)
     socket.send(request.encode('utf-8'))
 
+    # receive response
     resp = (socket.recv(10000))
     resp_code, resp_header, resp_body = parse_response(resp)
-    if ("500" in resp_code) or len(resp_code) == 0:
-        #Close and reopen socket, then try again
-        print("SOCKET CLOSED b/c 500 error")
-        resp_code, resp_header, resp_body = retry_after_500(url)
-        
-    return resp_code, resp_header, resp_body
 
+    return resp_code
+
+
+# re-request the given url after receiving a 500
 def retry_after_500(url):
     global csrf_token, session_id, sock
     newsock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -143,37 +165,54 @@ def retry_after_500(url):
     sock.send(request.encode('utf-8'))
     resp = (sock.recv(10000))
     resp_code, resp_header, resp_body = parse_response(resp)
-    print("new code", resp_code)
-    return resp_code, resp_header, resp_body
+
+    return handle_response_code(url, resp_code)
 
 
+
+
+# handle the response code of a request for a url
+# return True if known response code; otherwise return False
+def handle_response_code(url, resp_code):
+    if resp_code == 200 or resp_code == 403 or resp_code == 404:
+        visited.append(url)
+        return True
+
+    elif resp_code == 500 or resp_code == 0:
+        return retry_after_500(url)
+
+    elif resp_code == 301:
+        # TODO: handle 301 moved permanently
+        print("URL {0} 301 moved permanently".format(url))
+        return True
+
+    elif resp_code == 302:
+        # TODO: handle 302 redirect
+        print("URL {0} 302 redirect".format(url))
+        return True
+
+    else:
+        print("URL {0}  response code: {1}".format(url, resp_code))
+        return False
+
+
+
+# crawl the url
+# return True on success
+# return False if returned an unknown response code
+def crawl(socket, url):
+    resp_code = http_get(socket, url)
+    return handle_response_code(url, resp_code)
 
 
 
 # login to fakebook with given socket (for potential multiprocessing)
-# return response code of post request
-# after logging in, links have been added to queue, so just begin iterating through those
+# return True on success
 def login(socket):
     global session_id
 
-    # get login page to get csrf token
-    print("Requesting login page")
-    get_login = ('GET /accounts/login/?next=/fakebook/ HTTP/1.1\n' +
-                 'Host: fring.ccs.neu.edu\nAccept-Encoding: gzip, deflate\n' +
-                 'Connection: keep-alive\n\n')
-    print(get_login)
-    socket.send(get_login.encode('utf-8'))
-
-    data = (socket.recv(10000))
-    resp_code, resp_header, resp_body = parse_response(data)
-    # print("GET LOGIN PAGE RESPONSE CODE: ", resp_code)
-    # print("GET LOGIN PAGE HEADERS: ", str(resp_header))
-    # print("GET LOGIN PAGE BODY: ", resp_body)
-    parser.feed(resp_body)
-    visited.append('/accounts/login/?next=/fakebook/')
-
     body = 'password=E0N5X388&username=1946011&csrfmiddlewaretoken={0}'.format(csrf_token)
-    post_login = ('POST /accounts/login/ HTTP/1.1\r\n'+
+    post_login = ('POST /accounts/login/?next=/fakebook/ HTTP/1.1\r\n'+
                   'Host: fring.ccs.neu.edu\r\n'+
                   'Content-Type: application/x-www-form-urlencoded\r\n'+
                   'Cookie: csrftoken={0}\r\n'+
@@ -182,30 +221,24 @@ def login(socket):
                   'Accept-Encoding: gzip, deflate\r\n'+
                   'Content-Length: {1}\r\n\r\n{2}\r\n\r\n').format(csrf_token, len(body), body)
 
-    print(post_login)
     socket.send(post_login.encode('utf-8'))
 
-    data2 = (socket.recv(1000))
-    resp_code, resp_header, resp_body = parse_response(data2)
-    # print("POST LOGIN RESPONSE CODE: ", resp_code)
-    # print("POST LOGIN RESPONSE HEADER: ", str(resp_header))
-    # print("POST LOGIN RESPONSE BODY: ", resp_body)
-    code = resp_code[9:12]
+    data = (socket.recv(1000))
+    resp_code, resp_header, resp_body = parse_response(data)
+
     # if login successful, should redirect
-    if code == '302':
-        visited.append('/accounts/login/')
+    if resp_code == 302:
         parser.feed(resp_body)
         # set session_id to use for all requests
         session_id = get_header_secondary_value(resp_header['Set-Cookie'], 'sessionid')
 
         # navigate to redirect location
-        redirect = resp_header['Location']
-        resp_code, resp_header, resp_body = http_get(socket, redirect)
-        if '200' in resp_code:
-            visited.append(redirect)
+        redirect = check_valid_url(resp_header['Location'])
+        return crawl(socket, redirect)
+
+    return False
 
 
-    return code
 
 
 
@@ -219,30 +252,28 @@ try:
 except Exception as e:
     print("Socket connection error: %s" % e)
 
-# TODO: crawl links on login page first or last so as not to logout
 
+# crawl login page for csrf token
+crawl(sock, LOGIN_URL)
+
+# login
 login_response_code = login(sock)
-if login_response_code != '302':
+if not login_response_code:
     print("Login error: response code ", login_response_code)
 
+
+# crawl queued urls until all flags found
 while not queued.empty():
     if len(flags) == 5:
         break
+
     next_url = queued.get()
-    visited.append(next_url)
+    # crawl(sock, next_url)
+    if not crawl(sock, next_url):
+        print("queued: ", list(queued.queue))
+        print("visited: ", visited)
+        break
 
-    # http_get returns 3-tuple
-    resp_code, resp_header, resp_body = http_get(sock, next_url)
-    #code = response[0][9:12]
-    code = resp_code
-    parser.feed(resp_body)
-    # TODO: Handle 301, 403, 404, 500
-    # if code not in ['200', '302']:
-    #
-    #print("queued: ", list(queued.queue))
-    # for q in queued.:
-
-    #print("visited: ", visited)
 
 
 sock.shutdown(1)
