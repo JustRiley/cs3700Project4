@@ -30,12 +30,13 @@ class CustomHTMLParser(HTMLParser):
         self.flag = False
 
     def handle_starttag(self, tag, attrs):
-        global csrf_token
+        global csrf_token, visited, queued
         if tag == "a":
             link = [ii[1] for ii in attrs if ii[0] == "href"][0]
+            url = check_valid_url(link)
             # if begins with base url (either with or without "http://") and not in visited
-            if link[0] == '/' and link not in visited:
-                queued.put(link)
+            if url and url not in visited:
+                queued.put(url)
 
         # if secret flag tag, set flag to true to handle data correctly
         elif tag == "h2" and attrs == secret_flag_attrs:
@@ -66,7 +67,7 @@ class CustomHTMLParser(HTMLParser):
 def check_valid_url(url):
     if url[0] == '/':
         return url
-    elif (url[7:24] or url[:17]) == BASE_URL:
+    elif url[7:24] == BASE_URL or url[:17] == BASE_URL:
         return url.replace(BASE_URL, '').replace('http://', '')
     else:
         return None
@@ -123,7 +124,7 @@ def parse_response(data):
 
         return resp_code, resp_header, resp_body
 
-    except (TypeError, ValueError):
+    except Exception as e:
         return 0, 0, 0
 
 
@@ -132,7 +133,7 @@ def parse_response(data):
 # (multiprocessing: add token and sessionid as params)
 # return response code of request
 def http_get(socket, url, additional_headers=None):
-    global csrf_token, session_id
+    global csrf_token, session_id, flags
 
     # send request
     request = ('GET {0} HTTP/1.1\nHost: fring.ccs.neu.edu\n' +
@@ -142,7 +143,11 @@ def http_get(socket, url, additional_headers=None):
 
     # receive response
     resp = (socket.recv(10000))
+    before = len(flags)
     resp_code, resp_header, resp_body = parse_response(resp)
+    if len(flags) != before:
+        print("FOUND FLAG {0} AT {1}".format(flags[before], url))
+
 
     return resp_code
 
@@ -175,7 +180,6 @@ def retry_after_500(url):
 # return True if known response code; otherwise return False
 def handle_response_code(url, resp_code):
     if resp_code == 200 or resp_code == 403 or resp_code == 404:
-        visited.append(url)
         return True
 
     elif resp_code == 500 or resp_code == 0:
@@ -261,19 +265,20 @@ login_response_code = login(sock)
 if not login_response_code:
     print("Login error: response code ", login_response_code)
 
-
+print("begin crawl")
 # crawl queued urls until all flags found
 while not queued.empty():
     if len(flags) == 5:
         break
 
     next_url = queued.get()
-    # crawl(sock, next_url)
-    if not crawl(sock, next_url):
-        print("queued: ", list(queued.queue))
-        print("visited: ", visited)
-        break
-
+    if next_url not in visited:
+        visited.append(next_url)
+        # crawl(sock, next_url)
+        if not crawl(sock, next_url):
+            print("queued: ", list(queued.queue))
+            print("visited: ", visited)
+            break
 
 
 sock.shutdown(1)
