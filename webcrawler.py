@@ -260,13 +260,10 @@ login_response_code = login(sock, parser)
 if not login_response_code:
     print("Login error: response code ", login_response_code)
 
-print("begin crawl")
 cookie = {'csrf': parser.csrf_token, 'session_id': parser.session_id}
-print(cookie['csrf'])
-print(cookie['session_id'])
 
 # Start consumers
-num_crawlers = multiprocessing.cpu_count() * 2
+num_crawlers = 10#multiprocessing.cpu_count() * 2
 crawlers = [Crawler(queued, visited, cookie, flags)
              for i in range(num_crawlers)]
 
@@ -278,7 +275,5 @@ for cc in crawlers:
     # print("join crawler ", cc.name)
     cc.join()
 
-print('done')
 sock.shutdown(1)
 sock.close()
-print(flags)

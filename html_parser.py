@@ -41,4 +41,5 @@ class CustomHTMLParser(HTMLParser):
         # if the start tag for a secret flag was just handled, record secret flag
         if self.flag_found:
             self.flags.append(data)
+            print(data.split(" ")[1])
             self.flag_found = False
