@@ -1,3 +1,4 @@
+#!/usr/bin/python
 BASE_URL = "fring.ccs.neu.edu" # base url; only crawl sites with this as base
 
 # helper method to check if the url is valid

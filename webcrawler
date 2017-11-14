@@ -1,3 +1,5 @@
+#!/usr/bin/python
+
 import socket
 import sys
 import gzip
@@ -9,12 +11,8 @@ import html_parser
 BASE_URL = "fring.ccs.neu.edu" # base url; only crawl sites with this as base
 LOGIN_URL = "/accounts/login/?next=/fakebook/"
 
-# username = sys.argv[1]
-# password = sys.argv[2]
-
-
-username = '1962838'
-password = '9VGKTMDC'
+username = sys.argv[1]
+password = sys.argv[2]
 
 
 
@@ -38,9 +36,6 @@ def parse_response(data, parser):
             key, sep, value = header.partition(': ')
             resp_header[key] = value.replace('\r', '')
 
-        # TODO: special handling for chunks
-        if resp_header.get('Transfer-Encoding', None):
-            print('TRANSFER-ENCODING: CHUNKED')
 
         # response body begins after CRLF
         resp_body = data[start_idx+4:]
@@ -73,13 +68,14 @@ def http_get(crawler, url, additional_headers=None):
     resp = (crawler.sock.recv(10000))
     resp_code, resp_header, resp_body = parse_response(resp, crawler.parser)
 
-    return resp_code
+    if resp_code == 301:
+        return resp_code, resp_header['Location']
+    else:
+        return resp_code, None
 
 
 # re-request the given url after receiving a 500
 def retry_after_500(crawler, url):
-    # global csrf_token, session_id, sock
-
     # close old socket
     crawler.sock.shutdown(1)
     crawler.sock.close()
@@ -93,21 +89,25 @@ def retry_after_500(crawler, url):
     except Exception as e:
         print("Socket connection error: %s" % e)
 
+    # retry request
     request = ('GET {0} HTTP/1.1\nHost: fring.ccs.neu.edu\n' +
                'Accept-Encoding: gzip, deflate\nConnection: keep-alive\n' +
                'Cookie: csrftoken={1}; sessionid={2}\r\n\r\n').format(url, crawler.csrf_token, crawler.session_id)
     crawler.sock.send(request.encode('utf-8'))
     resp = (crawler.sock.recv(10000))
     resp_code, resp_header, resp_body = parse_response(resp, crawler.parser)
+    moved = None
+    if resp_code == 301:
+        moved = resp_header['Location']
 
-    return handle_response_code(crawler, url, resp_code)
+    return handle_response_code(crawler, url, resp_code, moved)
 
 
 
 
 # handle the response code of a request for a url
 # return True if known response code; otherwise return False
-def handle_response_code(crawler, url, resp_code):
+def handle_response_code(crawler, url, resp_code, moved_url):
     if resp_code == 200 or resp_code == 403 or resp_code == 404:
         return True
 
@@ -115,12 +115,11 @@ def handle_response_code(crawler, url, resp_code):
         return retry_after_500(crawler, url)
 
     elif resp_code == 301:
-        # TODO: handle 301 moved permanently
-        print("URL {0} 301 moved permanently".format(url))
-        return True
+        # crawl moved_url
+        print("URL {0} 301 moved to ".format(url), moved_url)
+        return crawl(crawler, moved_url)
 
     elif resp_code == 302:
-        # TODO: handle 302 redirect
         print("URL {0} 302 redirect".format(url))
         return True
 
@@ -134,8 +133,8 @@ def handle_response_code(crawler, url, resp_code):
 # return True on success
 # return False if returned an unknown response code
 def crawl(crawler, url):
-    resp_code = http_get(crawler, url)
-    return handle_response_code(crawler, url, resp_code)
+    resp_code, moved = http_get(crawler, url)
+    return handle_response_code(crawler, url, resp_code, moved)
 
 
 
@@ -204,10 +203,10 @@ class Crawler(multiprocessing.Process):
         multiprocessing.Process.__init__(self)
         self.queued = queued
         self.visited = visited
-        # import pdb; pdb.set_trace()
         self.csrf_token = cookie['csrf']
         self.session_id = cookie['session_id']
         self.flags = flags
+        # create crawler's parser
         self.parser = html_parser.CustomHTMLParser(queued, visited, self.csrf_token, flags)
 
         # setup socket
@@ -221,31 +220,32 @@ class Crawler(multiprocessing.Process):
 
 
     def run(self):
-        proc_name = self.name
-        # print("Begin process ", proc_name)
-
         while not self.queued.empty():
             if len(flags) == 5:
                 break
 
             next_url = self.queued.get()
             if next_url not in self.visited:
-                # print(next_url, proc_name)
                 self.visited.append(next_url)
                 crawl(self, next_url)
 
-        self,queued.cancel_join_thread()
+        self.queued.cancel_join_thread()
 
 
 
 
-# Establish communication queues
+########################### main method ###########################
+
+
+# init shared resources
 queued = multiprocessing.Queue()
 visited = multiprocessing.Manager().list()
 flags = multiprocessing.Manager().list()
+
+# parser for main process
 parser = html_parser.CustomHTMLParser(queued, visited, None, flags)
 
-# setup first socket (for login and cookie setup)
+# setup first (main process') socket (for login and cookie setup)
 sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 sock.settimeout(140.30)
 sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEPORT, 1)
@@ -254,26 +254,26 @@ try:
 except Exception as e:
     print("Socket connection error: %s" % e)
 
-
 # login
 login_response_code = login(sock, parser)
 if not login_response_code:
     print("Login error: response code ", login_response_code)
 
+# record cookie
 cookie = {'csrf': parser.csrf_token, 'session_id': parser.session_id}
 
-# Start consumers
-num_crawlers = 10#multiprocessing.cpu_count() * 2
+# init crawlers
+num_crawlers = 10
 crawlers = [Crawler(queued, visited, cookie, flags)
-             for i in range(num_crawlers)]
+            for i in range(num_crawlers)]
 
 for cc in crawlers:
     cc.start()
 
-# Wait for all crawlers to finish
+# wait for all crawlers to finish
 for cc in crawlers:
-    # print("join crawler ", cc.name)
     cc.join()
 
+# close main process' socket
 sock.shutdown(1)
 sock.close()
